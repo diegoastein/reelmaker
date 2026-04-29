@@ -2,143 +2,145 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Reel Maker Expert</title>
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <title>Reel Maker - Fix Total</title>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <style>
-        :root { --primary: #e1306c; --bg: #fafafa; }
-        body { font-family: sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; }
-        .card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
-        .drop-zone { border: 2px dashed #dbdbdb; padding: 40px; text-align: center; border-radius: 15px; cursor: pointer; transition: 0.3s; }
-        .drop-zone:hover { border-color: var(--primary); background: #fff5f7; }
-        .preview-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0; }
-        .preview-grid img { width: 100%; aspect-ratio: 9/16; object-fit: cover; border-radius: 5px; border: 2px solid #eee; }
-        .controls { display: flex; gap: 15px; margin-bottom: 20px; }
-        input { width: 100%; padding: 10px; border: 1px solid #dbdbdb; border-radius: 8px; }
-        button { background: var(--primary); color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 1rem; }
-        button:disabled { background: #ccc; }
-        #log { font-size: 0.8rem; color: #666; margin-top: 15px; text-align: center; }
+        body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 20px; }
+        .card { background: white; padding: 2rem; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 450px; }
+        .step { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 10px; }
+        button { background: #e1306c; color: white; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #log { margin-top: 15px; font-size: 0.85rem; color: #555; background: #fafafa; padding: 10px; border-radius: 5px; min-height: 40px; }
+        .preview { display: flex; gap: 5px; overflow-x: auto; margin-top: 10px; }
+        .preview img { height: 80px; border-radius: 4px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h2 style="text-align:center">Instagram Reel Generator</h2>
+    <h2 style="text-align:center; color: #e1306c;">Reel Generator</h2>
     
-    <div class="drop-zone" onclick="document.getElementById('imgs').click()">
-        <p>📸 Seleccioná tus 5 imágenes</p>
-        <input type="file" id="imgs" multiple accept="image/*" style="display:none">
+    <div class="step">
+        <strong>1. Imágenes (5 PNG/JPG)</strong>
+        <input type="file" id="imgs" multiple accept="image/*" style="margin-top:10px">
+        <div id="imgPreview" class="preview"></div>
     </div>
 
-    <div id="preview" class="preview-grid"></div>
-
-    <div class="drop-zone" onclick="document.getElementById('aud').click()" style="padding: 20px; margin-bottom: 20px;">
-        <p id="aud-label">🎵 Seleccioná la música</p>
-        <input type="file" id="aud" accept="audio/*" style="display:none">
+    <div class="step">
+        <strong>2. Audio (MP3)</strong>
+        <input type="file" id="aud" accept="audio/mp3" style="margin-top:10px">
     </div>
 
-    <div class="controls">
-        <div>
-            <label style="font-size: 0.8rem;">Seg x Foto</label>
-            <input type="number" id="sec" value="2" step="0.1">
-        </div>
-    </div>
-
-    <button id="go" disabled>Generar MP4 para Instagram</button>
-    <div id="log"></div>
+    <button id="go" disabled>GENERAR REEL (.MP4)</button>
+    
+    <div id="log">Esperando archivos...</div>
 </div>
 
 <canvas id="c" width="1080" height="1920" style="display:none"></canvas>
 
 <script>
     const { createFFmpeg, fetchFile } = FFmpeg;
-    const ffmpeg = createFFmpeg({ log: true });
-    
-    let images = [];
+    // Forzamos el uso de un solo hilo para evitar el error de SharedArrayBuffer
+    const ffmpeg = createFFmpeg({ 
+        log: true,
+        mainName: 'main',
+        corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+    });
+
+    let imageFiles = [];
     let audioFile = null;
 
+    // Vista previa de imágenes
     document.getElementById('imgs').onchange = (e) => {
-        images = Array.from(e.target.files);
-        const prev = document.getElementById('preview');
-        prev.innerHTML = '';
-        images.forEach(file => {
+        imageFiles = Array.from(e.target.files);
+        const div = document.getElementById('imgPreview');
+        div.innerHTML = '';
+        imageFiles.forEach(file => {
             const img = document.createElement('img');
             img.src = URL.createObjectURL(file);
-            prev.appendChild(img);
+            div.appendChild(img);
         });
-        check();
+        checkInputs();
     };
 
     document.getElementById('aud').onchange = (e) => {
         audioFile = e.target.files[0];
-        document.getElementById('aud-label').innerText = "✅ " + audioFile.name;
-        check();
+        checkInputs();
     };
 
-    const check = () => document.getElementById('go').disabled = !(images.length > 0 && audioFile);
+    function checkInputs() {
+        document.getElementById('go').disabled = !(imageFiles.length > 0 && audioFile);
+    }
 
     document.getElementById('go').onclick = async () => {
-        const btn = document.getElementById('go');
         const log = document.getElementById('log');
+        const btn = document.getElementById('go');
         btn.disabled = true;
-        
-        if (!ffmpeg.isLoaded()) {
-            log.innerText = "Cargando motor de video...";
-            await ffmpeg.load();
+
+        try {
+            if (!ffmpeg.isLoaded()) {
+                log.innerText = "Cargando motor de video (esto puede tardar la primera vez)...";
+                await ffmpeg.load();
+            }
+
+            const canvas = document.getElementById('c');
+            const ctx = canvas.getContext('2d');
+
+            log.innerText = "Procesando fotos...";
+            for (let i = 0; i < imageFiles.length; i++) {
+                const img = await new Promise(resolve => {
+                    const image = new Image();
+                    image.onload = () => resolve(image);
+                    image.src = URL.createObjectURL(imageFiles[i]);
+                });
+
+                // Ajuste Cover Vertical (9:16)
+                const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
+                const x = (canvas.width / 2) - (img.width / 2) * scale;
+                const y = (canvas.height / 2) - (img.height / 2) * scale;
+                ctx.fillStyle = "black";
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+
+                // Escribir imagen en el sistema virtual de FFmpeg
+                const data = canvas.toDataURL('image/jpeg', 0.8);
+                const arrayBuffer = await (await fetch(data)).arrayBuffer();
+                ffmpeg.FS('writeFile', `img${i}.jpg`, new Uint8Array(arrayBuffer));
+            }
+
+            log.innerText = "Cargando audio...";
+            ffmpeg.FS('writeFile', 'sound.mp3', await fetchFile(audioFile));
+
+            log.innerText = "Renderizando MP4... paciencia.";
+            
+            // Comando para Reels: 2 segundos por foto
+            await ffmpeg.run(
+                '-framerate', '1/2', 
+                '-i', 'img%d.jpg', 
+                '-i', 'sound.mp3',
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-t', `${imageFiles.length * 2}`,
+                '-shortest',
+                'out.mp4'
+            );
+
+            log.innerText = "¡Hecho! Descargando...";
+            const result = ffmpeg.FS('readFile', 'out.mp4');
+            const url = URL.createObjectURL(new Blob([result.buffer], { type: 'video/mp4' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mi_reel.mp4';
+            a.click();
+
+        } catch (err) {
+            console.error(err);
+            log.innerText = "Error: " + err.message;
+        } finally {
+            btn.disabled = false;
         }
-
-        const canvas = document.getElementById('c');
-        const ctx = canvas.getContext('2d');
-        const secPerImg = parseFloat(document.getElementById('sec').value);
-        
-        log.innerText = "Procesando frames...";
-        
-        for(let i=0; i < images.length; i++) {
-            const img = await new Promise(res => {
-                const ig = new Image();
-                ig.onload = () => res(ig);
-                ig.src = URL.createObjectURL(images[i]);
-            });
-
-            // Lógica de "Cover" para 9:16
-            const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
-            const x = (canvas.width / 2) - (img.width / 2) * scale;
-            const y = (canvas.height / 2) - (img.height / 2) * scale;
-            ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
-
-            // Guardar frame en el sistema de archivos virtual de FFmpeg
-            const frameData = canvas.toDataURL('image/jpeg', 0.8);
-            const res = await fetch(frameData);
-            const blob = await res.blob();
-            ffmpeg.FS('writeFile', `f${i}.jpg`, await fetchFile(blob));
-        }
-
-        ffmpeg.FS('writeFile', 'audio.mp3', await fetchFile(audioFile));
-
-        log.innerText = "Renderizando MP4 final...";
-        
-        // Comando FFmpeg para unir fotos con el audio y sacar un MP4 real
-        // -loop 1 para cada imagen con su duración específica
-        await ffmpeg.run(
-            '-framerate', `1/${secPerImg}`, 
-            '-i', 'f%d.jpg', 
-            '-i', 'audio.mp3',
-            '-c:v', 'libx264',
-            '-t', `${images.length * secPerImg}`,
-            '-pix_fmt', 'yuv420p',
-            '-shortest',
-            'reel.mp4'
-        );
-
-        const data = ffmpeg.FS('readFile', 'reel.mp4');
-        const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'mi_reel.mp4';
-        a.click();
-        
-        log.innerText = "¡Listo para Instagram!";
-        btn.disabled = false;
     };
 </script>
+
 </body>
 </html>

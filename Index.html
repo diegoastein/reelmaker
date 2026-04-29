@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reel Maker Expert - Fixed</title>
+    <script src="https://unpkg.com/coi-serviceworker"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.7/dist/ffmpeg.min.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/index.js"></script>
+    
+    <style>
+        :root { --primary: #e1306c; --bg: #fafafa; }
+        body { font-family: sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; }
+        .card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
+        .drop-zone { border: 2px dashed #dbdbdb; padding: 40px; text-align: center; border-radius: 15px; cursor: pointer; }
+        .preview-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0; }
+        .preview-grid img { width: 100%; aspect-ratio: 9/16; object-fit: cover; border-radius: 5px; }
+        button { background: var(--primary); color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        #log { font-size: 0.8rem; color: #666; margin-top: 15px; text-align: center; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2 style="text-align:center">Reel Generator</h2>
+    <div class="drop-zone" onclick="document.getElementById('imgs').click()">
+        📸 Imágenes (PNG/JPG)
+        <input type="file" id="imgs" multiple accept="image/*" style="display:none">
+    </div>
+    <div id="preview" class="preview-grid"></div>
+    <div class="drop-zone" onclick="document.getElementById('aud').click()" style="padding: 15px;">
+        🎵 Audio (MP3)
+        <input type="file" id="aud" accept="audio/*" style="display:none">
+    </div>
+    <br>
+    <button id="go" disabled>Generar MP4</button>
+    <div id="log">Esperando archivos...</div>
+</div>
+
+<canvas id="c" width="1080" height="1920" style="display:none"></canvas>
+
+<script>
+    const { FFmpeg } = window.FFmpeg;
+    const { fetchFile } = window.FFmpegUtil;
+    let ffmpeg = null;
+
+    let images = [];
+    let audioFile = null;
+
+    document.getElementById('imgs').onchange = (e) => {
+        images = Array.from(e.target.files);
+        const prev = document.getElementById('preview');
+        prev.innerHTML = '';
+        images.forEach(file => {
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(file);
+            prev.appendChild(img);
+        });
+        check();
+    };
+
+    document.getElementById('aud').onchange = (e) => {
+        audioFile = e.target.files[0];
+        check();
+    };
+
+    const check = () => document.getElementById('go').disabled = !(images.length > 0 && audioFile);
+
+    document.getElementById('go').onclick = async () => {
+        const log = document.getElementById('log');
+        const btn = document.getElementById('go');
+        btn.disabled = true;
+
+        try {
+            if (!ffmpeg) {
+                log.innerText = "Iniciando motor de video...";
+                ffmpeg = new FFmpeg();
+                await ffmpeg.load({
+                    coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
+                });
+            }
+
+            const canvas = document.getElementById('c');
+            const ctx = canvas.getContext('2d');
+            
+            for(let i=0; i < images.length; i++) {
+                log.innerText = `Procesando imagen ${i+1}...`;
+                const img = await new Promise(res => {
+                    const ig = new Image();
+                    ig.onload = () => res(ig);
+                    ig.src = URL.createObjectURL(images[i]);
+                });
+
+                const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
+                const x = (canvas.width / 2) - (img.width / 2) * scale;
+                const y = (canvas.height / 2) - (img.height / 2) * scale;
+                ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+
+                const frameData = canvas.toDataURL('image/jpeg', 0.9);
+                const base64Data = frameData.split(',')[1];
+                const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                
+                await ffmpeg.writeFile(`f${i}.jpg`, binaryData);
+            }
+
+            await ffmpeg.writeFile('audio.mp3', await fetchFile(audioFile));
+            
+            log.innerText = "Renderizando MP4 (esto puede tardar)...";
+            // Comando optimizado para Reels
+            await ffmpeg.exec([
+                '-framerate', '1/2', // 2 segundos por foto
+                '-i', 'f%d.jpg', 
+                '-i', 'audio.mp3',
+                '-c:v', 'libx264',
+                '-t', `${images.length * 2}`,
+                '-pix_fmt', 'yuv420p',
+                '-vf', 'scale=1080:1920',
+                'output.mp4'
+            ]);
+
+            const data = await ffmpeg.readFile('output.mp4');
+            const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'reel_instagram.mp4';
+            a.click();
+            log.innerText = "¡Completado!";
+        } catch (e) {
+            console.error(e);
+            log.innerText = "Error: " + e.message;
+        }
+        btn.disabled = false;
+    };
+</script>
+</body>
+</html>
